@@ -1,5 +1,6 @@
 package com.utp.ms_notifications.service;
 
+import com.utp.ms_notifications.client.UserDirectoryClient;
 import com.utp.ms_notifications.dto.BookingEvent;
 import com.utp.ms_notifications.dto.NotificationResponse;
 import com.utp.ms_notifications.entity.Notification;
@@ -17,6 +18,8 @@ import java.util.stream.Collectors;
 public class NotificationService {
 
     private final NotificationRepository notificationRepository;
+    private final EmailService emailService;
+    private final UserDirectoryClient userDirectoryClient;
 
     public void processBookingEvent(BookingEvent event) {
         String message = buildMessage(event);
@@ -30,9 +33,32 @@ public class NotificationService {
                 .build();
 
         notificationRepository.save(notification);
+        emailService.sendEmail(event.getUserEmail(), "Actualización de tu reserva Walon", message);
 
-        // Simulación de envío real (aquí luego conectas SendGrid, SMTP, etc.)
-        log.info("📧 Notificación enviada a {}: {}", event.getUserEmail(), message);
+        if ("CANCELLED".equals(event.getStatus())) {
+            broadcastCancellation(event);
+        }
+    }
+
+    private void broadcastCancellation(BookingEvent event) {
+        String broadcastMessage = "Se liberó un horario: cancha #" + event.getStadiumId()
+                + " el " + event.getBookingDate() + " a las " + event.getStartTime() + ".";
+
+        List<String> emails = userDirectoryClient.getAllEmails();
+        for (String email : emails) {
+            if (email.equalsIgnoreCase(event.getUserEmail())) continue;
+
+            Notification notification = Notification.builder()
+                    .bookingId(event.getBookingId())
+                    .userEmail(email)
+                    .message(broadcastMessage)
+                    .channel("EMAIL")
+                    .sent(true)
+                    .build();
+            notificationRepository.save(notification);
+            emailService.sendEmail(email, "¡Horario disponible en Walon!", broadcastMessage);
+        }
+        log.info("Broadcast de cancelación enviado a {} usuarios", emails.size());
     }
 
     public List<NotificationResponse> findMyNotifications(String userEmail) {
