@@ -12,4 +12,5 @@ public class NotificationResponse {
     private String message;
     private String channel;
     private LocalDateTime createdAt;
+    private boolean read;
 }

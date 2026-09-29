@@ -8,7 +8,10 @@ import com.utp.ms_notifications.repository.NotificationRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-
+import com.utp.ms_notifications.dto.NotificationPageResponse;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -20,6 +23,7 @@ public class NotificationService {
     private final NotificationRepository notificationRepository;
     private final EmailService emailService;
     private final UserDirectoryClient userDirectoryClient;
+    private static final int MAX_PAGE_SIZE = 20;
 
     public void processBookingEvent(BookingEvent event) {
         String message = buildMessage(event);
@@ -63,8 +67,50 @@ public class NotificationService {
 
     public List<NotificationResponse> findMyNotifications(String userEmail) {
         return notificationRepository.findByUserEmailOrderByCreatedAtDesc(userEmail).stream()
-                .map(n -> new NotificationResponse(n.getId(), n.getBookingId(), n.getMessage(), n.getChannel(), n.getCreatedAt()))
+                .map(this::toResponse)
                 .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public NotificationPageResponse findMyNotificationsPage(String userEmail, int page, int size) {
+        int safePage = Math.max(page, 0);
+        int safeSize = Math.min(Math.max(size, 1), MAX_PAGE_SIZE);
+
+        Page<Notification> result = notificationRepository
+                .findByUserEmailOrderByCreatedAtDescIdDesc(userEmail, PageRequest.of(safePage, safeSize));
+
+        List<NotificationResponse> content = result.getContent().stream()
+                .map(this::toResponse)
+                .collect(Collectors.toList());
+
+        return new NotificationPageResponse(
+                content,
+                result.getNumber(),
+                result.getSize(),
+                result.getTotalElements(),
+                result.getTotalPages(),
+                notificationRepository.countByUserEmailAndReadFalse(userEmail)
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public long countUnread(String userEmail) {
+        return notificationRepository.countByUserEmailAndReadFalse(userEmail);
+    }
+
+    @Transactional
+    public void markAsRead(Long id, String userEmail) {
+        notificationRepository.markAsRead(id, userEmail);
+    }
+
+    @Transactional
+    public void markAllAsRead(String userEmail) {
+        notificationRepository.markAllAsRead(userEmail);
+    }
+
+    private NotificationResponse toResponse(Notification n) {
+        return new NotificationResponse(n.getId(), n.getBookingId(), n.getMessage(),
+                n.getChannel(), n.getCreatedAt(), n.isRead());
     }
 
     private String buildMessage(BookingEvent event) {
